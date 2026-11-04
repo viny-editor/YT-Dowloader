@@ -291,7 +291,7 @@
       </button>
     </div>
     <div class="brand pywebview-drag-region"><i></i>YT_DOWNLOADER</div>
-    <span class="ver pywebview-drag-region">v2.9</span>
+    <span class="ver pywebview-drag-region">v2.12</span>
     <div class="spacer pywebview-drag-region"></div>
     <button class="tab active" data-view="new">Novo</button>
     <button class="tab" data-view="queue">Fila<span class="n" id="qCount"></span></button>
@@ -316,6 +316,7 @@
                 <button data-sort="seq" class="active" title="Na ordem em que você colou os links">Ordem de envio</button>
                 <button data-sort="recent" title="Os que terminaram por último primeiro">Mais recentes</button>
               </div>
+              <button class="btn sm" id="hClear" title="Esvazia esta lista. Os arquivos no computador NÃO são apagados.">Limpar histórico</button>
             </div>
           </div>
           <div id="hList"><div class="empty">Nenhum vídeo baixado ainda.</div></div>
@@ -683,6 +684,7 @@ function renderHistory() {
   let list = hItems.filter(i => !q || norm(i.name).includes(q) || norm(i.title).includes(q));
   if (hSort === "recent") list = [...list].sort((a, b) => (b.finished || 0) - (a.finished || 0));
   $("hCount").textContent = hItems.length ? `[${hItems.length}]` : "";
+  $("hClear").disabled = !hItems.length;
   if (!hItems.length) { $("hList").innerHTML = '<div class="empty">Nenhum vídeo baixado ainda. Os vídeos aparecem aqui assim que terminam.</div>'; return; }
   if (!list.length) { $("hList").innerHTML = '<div class="empty">Nada encontrado com essa busca.</div>'; return; }
   const finder = platform === "win" ? "Explorer" : "Finder";
@@ -753,6 +755,19 @@ $("hList").addEventListener("keydown", (e) => {
   if (e.target.id !== "rnInput") return;
   if (e.key === "Enter") { e.preventDefault(); saveRename(); }
   else if (e.key === "Escape") { e.preventDefault(); stopRename(); }
+});
+$("hClear").addEventListener("click", async () => {
+  if (!hItems.length) return;
+  const n = hItems.length;
+  if (!confirm(`Limpar o histórico de ${n} ${n === 1 ? "download" : "downloads"}?\n\nIsso só esvazia a lista do app. Os vídeos no seu computador NÃO serão apagados.`)) return;
+  try {
+    editingId = null;
+    for (const k in hErrors) delete hErrors[k];
+    await api("/api/history/clear", {});
+    $("hSearch").value = "";
+    await loadHistory();
+    poll();
+  } catch (e) { $("hList").insertAdjacentHTML("afterbegin", `<div class="msg err">${esc(e.message)}</div>`); }
 });
 $("hSearch").addEventListener("input", () => { if (!editingId) renderHistory(); });
 document.querySelectorAll("#hSort button").forEach(b => b.addEventListener("click", () => {

@@ -27,7 +27,7 @@
 - **Vários ao mesmo tempo** — cole o link, aperte **Enter** e cole o próximo. Até 3 baixam juntos; o resto espera na fila.
 - **Pasta por download** — ligue *Perguntar a pasta a cada download* para escolher o destino de cada vídeo, ou deixe desligado para tudo ir para a pasta padrão.
 - **Fila de downloads** — na ordem em que os links foram colados, com progresso, velocidade e tempo restante; cancele a qualquer momento.
-- **Página Baixados** — todos os vídeos já baixados, numerados na ordem em que você colou os links. Renomeie o arquivo direto na lista, abra, mostre no Finder/Explorer ou busque pelo nome. A lista fica salva entre uma abertura e outra.
+- **Página Baixados** — todos os vídeos já baixados, numerados na ordem em que você colou os links. Renomeie o arquivo direto na lista, abra, mostre no Finder/Explorer ou busque pelo nome. A lista fica salva entre uma abertura e outra, e o botão **Limpar histórico** esvazia a lista sem apagar nenhum arquivo do computador.
 - **Janela própria** no Mac e no Windows — não depende do navegador.
 - **Se atualiza sozinho** — o motor de download (yt-dlp) é atualizado uma vez por dia, então o app continua funcionando quando o YouTube muda algo.
 
@@ -55,11 +55,11 @@ Na página de [Releases](https://github.com/viny-editor/YT-Dowloader/releases/la
 
 ### Windows
 
-1. Descompacte o `YT-Downloader-Windows.zip` e mova a pasta **YT Downloader** para um lugar fixo (ex.: Documentos).
-2. Abra **YT Downloader.exe**. Se aparecer "O Windows protegeu o computador" (SmartScreen),
-   clique em **Mais informações → Executar assim mesmo**.
-3. Na primeira vez, uma janela de instalação baixa o que o app precisa (1 a 2 minutos).
-   Depois disso aparece um atalho **YT Downloader** no Menu Iniciar.
+1. Descompacte o `YT-Downloader-Windows.zip` e abra **YT Downloader.exe**, que fica dentro da pasta.
+2. Se aparecer "O Windows protegeu o computador" (SmartScreen), clique em **Mais informações → Executar assim mesmo**.
+3. O app **se instala sozinho**, só para o seu usuário e sem pedir senha de administrador, em `%LOCALAPPDATA%\Programs\YT Downloader`. Ele cria atalhos na **Área de Trabalho** e no **Menu Iniciar**.
+4. Na primeira vez, uma janela de preparação baixa o que o app precisa (1 a 2 minutos).
+5. Depois disso, **pode apagar a pasta e o .zip baixados**. Para atualizar, abra uma vez o `.exe` de uma versão nova: ele substitui a instalação.
 
 Em ambos os sistemas é preciso internet na primeira abertura.
 
@@ -105,7 +105,7 @@ Crie uma **Release** no GitHub com uma tag no formato `v2.5`. A automação mont
 ## Problemas?
 
 - **Desinstalar (Mac):** apague o app e a pasta `~/Library/Application Support/YT Downloader`.
-- **Desinstalar (Windows):** apague a pasta do app, a pasta `%LOCALAPPDATA%\YT Downloader` e o atalho do Menu Iniciar.
+- **Desinstalar (Windows):** apague as pastas `%LOCALAPPDATA%\Programs\YT Downloader` e `%LOCALAPPDATA%\YT Downloader` e os atalhos da Área de Trabalho e do Menu Iniciar.
 - **Algo deu errado:** abra uma [issue](https://github.com/viny-editor/YT-Dowloader/issues) com as últimas linhas do registro (`log.txt`):
   - Mac: `tail -40 ~/Library/"Application Support"/"YT Downloader"/log.txt`
   - Windows: abra `%LOCALAPPDATA%\YT Downloader\log.txt` (cole o caminho no Explorador de Arquivos)

@@ -1,22 +1,29 @@
 YT Downloader para Windows — como instalar
 
-1. Descompacte o .zip. Vai sair a pasta "YT Downloader".
-   Mova essa pasta para um lugar fixo, por exemplo "Documentos".
-   (Não rode de dentro do .zip.)
+1. Descompacte o .zip e abra a pasta "YT Downloader".
 
-2. Dentro da pasta, dê dois cliques em "YT Downloader.exe".
+2. Dê dois cliques em "YT Downloader.exe".
 
 3. O Windows pode mostrar "O Windows protegeu o computador" (SmartScreen),
    porque o app não tem assinatura digital paga:
      clique em "Mais informações" > "Executar assim mesmo".
 
-4. Na primeira vez aparece uma janela de instalação. Leva 1 a 2 minutos:
+4. O app se instala sozinho, só para o seu usuário (não pede senha de
+   administrador), em %LOCALAPPDATA%\Programs\YT Downloader, e cria atalhos
+   "YT Downloader" na Área de Trabalho e no Menu Iniciar.
+   Um aviso confirma: "YT Downloader instalado!"
+
+5. Na primeira vez aparece também uma janela de preparação (1 a 2 minutos):
    ele baixa o Python, o yt-dlp, o ffmpeg e o Deno só para ele, em
    %LOCALAPPDATA%\YT Downloader (sem mexer no resto do Windows).
 
-5. Pronto. Depois disso o app abre em segundos, e aparece um atalho
-   "YT Downloader" no Menu Iniciar (pode fixar na barra de tarefas).
+6. Pronto! Você JÁ PODE APAGAR a pasta e o .zip que baixou.
+   Daqui pra frente, abra pelo atalho da Área de Trabalho ou do Menu Iniciar.
    O motor de download se atualiza sozinho uma vez por dia.
+
+Para atualizar o app: baixe a versão nova do GitHub e abra o
+"YT Downloader.exe" dela uma vez. Ele substitui a instalação antiga
+(seus downloads e configurações continuam) e a pasta baixada pode ser apagada.
 
 Para fechar: o × no canto da janela ou "FECHAR APP" no rodapé.
 Para arrastar a janela: segure na barra de cima (onde está YT_DOWNLOADER).
@@ -29,5 +36,7 @@ Se algo der errado, o registro fica em:
    %LOCALAPPDATA%\YT Downloader\log.txt
 (cole esse caminho na barra de endereço do Explorador de Arquivos)
 
-Para desinstalar: apague a pasta "YT Downloader", a pasta acima e o
-atalho do Menu Iniciar.
+Para desinstalar, apague:
+   %LOCALAPPDATA%\Programs\YT Downloader   (o app)
+   %LOCALAPPDATA%\YT Downloader             (Python, motor e histórico)
+   e os atalhos "YT Downloader" da Área de Trabalho e do Menu Iniciar.

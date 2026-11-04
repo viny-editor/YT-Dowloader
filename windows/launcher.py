@@ -25,7 +25,7 @@ import uuid
 import zipfile
 from pathlib import Path
 
-APP_VERSION = "2.11"
+APP_VERSION = "2.12"
 PORT = 8765
 NAME = "YT Downloader"
 URL = f"http://127.0.0.1:{PORT}"
@@ -33,6 +33,8 @@ DEMO = "--demo" in sys.argv
 
 LOCAL = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
 SUPPORT = LOCAL / NAME
+INSTALL_DIR = LOCAL / "Programs" / NAME          # onde o app fica instalado
+INSTALLED_EXE = INSTALL_DIR / f"{NAME}.exe"
 BIN = SUPPORT / "bin"
 VENV = SUPPORT / "venv"
 RUNTIME = SUPPORT / "runtime"
@@ -183,8 +185,28 @@ def copy_runtime():
     new.rename(RUNTIME)
 
 
+def make_shortcut(lnk_expr, exe):
+    q = str(exe).replace("'", "''")
+    folder = str(Path(exe).parent).replace("'", "''")
+    ps = (
+        f"$p = {lnk_expr};"
+        "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($p);"
+        f"$s.TargetPath = '{q}'; $s.WorkingDirectory = '{folder}'; $s.IconLocation = '{q},0';"
+        "$s.Description = 'Baixar vídeos do YouTube'; $s.Save()"
+    )
+    r = subprocess.run(["powershell", "-NoProfile", "-Command", ps], creationflags=NO_WINDOW,
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        log("Aviso: atalho não criado:", r.stderr.strip()[:300])
+    return r.returncode == 0
+
+
+START_LNK = "Join-Path $env:APPDATA 'Microsoft\\Windows\\Start Menu\\Programs\\YT Downloader.lnk'"
+DESKTOP_LNK = "Join-Path ([Environment]::GetFolderPath('Desktop')) 'YT Downloader.lnk'"
+
+
 def ensure_shortcut():
-    """Cria/atualiza o atalho no Menu Iniciar apontando para este .exe."""
+    """Mantém o atalho do Menu Iniciar apontando para o app instalado."""
     if not getattr(sys, "frozen", False):
         return
     exe = str(Path(sys.executable).resolve())
@@ -193,20 +215,102 @@ def ensure_shortcut():
             return
     except Exception:
         pass
-    q = exe.replace("'", "''")
-    folder = str(Path(exe).parent).replace("'", "''")
-    ps = (
-        "$p = Join-Path $env:APPDATA 'Microsoft\\Windows\\Start Menu\\Programs\\YT Downloader.lnk';"
-        "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($p);"
-        f"$s.TargetPath = '{q}'; $s.WorkingDirectory = '{folder}'; $s.IconLocation = '{q},0';"
-        "$s.Description = 'Baixar vídeos do YouTube'; $s.Save()"
-    )
-    r = subprocess.run(["powershell", "-NoProfile", "-Command", ps], creationflags=NO_WINDOW,
-                       capture_output=True, text=True)
-    if r.returncode == 0:
+    if make_shortcut(START_LNK, exe):
         SHORTCUT_STAMP.write_text(exe, encoding="utf-8")
-    else:
-        log("Aviso: atalho não criado:", r.stderr.strip()[:300])
+
+
+# ------------------------------------------------------------------ instalação
+def running_installed():
+    try:
+        return Path(sys.executable).resolve().parent == INSTALL_DIR.resolve()
+    except Exception:
+        return False
+
+
+def installed_version():
+    try:
+        return (INSTALL_DIR / "versao.txt").read_text(encoding="utf-8").strip()
+    except Exception:
+        return None
+
+
+def install_self():
+    """Copia o app (a pasta onde este .exe está) para INSTALL_DIR.
+
+    Devolve "novo", "atualizado" ou "igual".
+    """
+    src = Path(sys.executable).resolve().parent
+    have = installed_version()
+    if have == APP_VERSION and INSTALLED_EXE.exists():
+        return "igual"
+    INSTALL_DIR.parent.mkdir(parents=True, exist_ok=True)
+    new = INSTALL_DIR.with_name(NAME + ".novo")
+    old = INSTALL_DIR.with_name(NAME + ".antigo")
+    shutil.rmtree(new, ignore_errors=True)
+    shutil.rmtree(old, ignore_errors=True)
+    shutil.copytree(src, new)
+    (new / "versao.txt").write_text(APP_VERSION, encoding="utf-8")
+    if INSTALL_DIR.exists():
+        for attempt in range(10):  # o .exe antigo pode estar fechando
+            try:
+                INSTALL_DIR.rename(old)
+                break
+            except OSError:
+                time.sleep(0.5)
+        else:
+            raise RuntimeError("Não consegui atualizar a instalação (arquivo em uso).")
+    new.rename(INSTALL_DIR)
+    shutil.rmtree(old, ignore_errors=True)
+    log(f"Instalado em {INSTALL_DIR} (versão {APP_VERSION}, antes: {have}).")
+    return "novo" if have is None else "atualizado"
+
+
+def message_box(text, title=NAME):
+    try:
+        import ctypes
+
+        ctypes.windll.user32.MessageBoxW(None, text, title, 0x40 | 0x40000)  # info + topo
+    except Exception:
+        pass
+
+
+def release_mutex():
+    global _MUTEX
+    if _MUTEX:
+        try:
+            import ctypes
+
+            ctypes.windll.kernel32.CloseHandle(ctypes.c_void_p(_MUTEX))
+        except Exception:
+            pass
+        _MUTEX = None
+
+
+def run_from_install():
+    """Rodando da pasta baixada: instala (ou atualiza) e passa a vez para a cópia instalada."""
+    try:
+        result = install_self()
+    except Exception:
+        log(traceback.format_exc())
+        message_box("Não consegui instalar o YT Downloader na pasta do usuário.\n"
+                    "Ele vai abrir a partir desta pasta mesmo.\n\nDetalhes em:\n" + str(LOG))
+        return False
+    if result != "igual":
+        make_shortcut(START_LNK, INSTALLED_EXE)
+        if result == "novo":
+            make_shortcut(DESKTOP_LNK, INSTALLED_EXE)
+        SHORTCUT_STAMP.write_text(str(INSTALLED_EXE.resolve()), encoding="utf-8")
+    release_mutex()
+    subprocess.Popen([str(INSTALLED_EXE)], cwd=str(INSTALL_DIR), close_fds=True,
+                     creationflags=DETACHED)
+    if result == "novo":
+        message_box("YT Downloader instalado!\n\n"
+                    "Agora ele abre pelo atalho na Área de Trabalho ou no Menu Iniciar.\n"
+                    "Você já pode apagar a pasta que baixou do GitHub.")
+    elif result == "atualizado":
+        message_box(f"YT Downloader atualizado para a versão {APP_VERSION}.\n\n"
+                    "Você já pode apagar a pasta que baixou do GitHub.")
+    return True
 
 
 def launch_app():
@@ -550,6 +654,9 @@ def main():
     if not single_instance():
         wait_other_instance()
         return
+    if getattr(sys, "frozen", False) and not running_installed():
+        if run_from_install():
+            return
     if handle_running_instance():
         return
     todo = plan()

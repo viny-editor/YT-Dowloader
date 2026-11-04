@@ -20,7 +20,7 @@ from pathlib import Path
 
 PORT = 8765
 MAX_PARALLEL = 3  # downloads ao mesmo tempo; o resto espera na fila
-APP_VERSION = "2.9"
+APP_VERSION = "2.12"
 IS_WIN = sys.platform == "win32"
 IS_MAC = sys.platform == "darwin"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # Windows: sem piscar console
@@ -793,6 +793,14 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 raise ValueError("O arquivo e a pasta não foram encontrados.")
             self.send_json({"ok": True})
+
+        elif p == "/api/history/clear":
+            # só esvazia a lista do app; nenhum arquivo do computador é apagado
+            with hist_lock:
+                removed = len(history["items"])
+                history["items"] = []
+                save_history()
+            self.send_json({"ok": True, "removed": removed})
 
         elif p == "/api/file/forget":
             with hist_lock:
