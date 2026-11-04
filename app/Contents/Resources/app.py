@@ -20,7 +20,7 @@ from pathlib import Path
 
 PORT = 8765
 MAX_PARALLEL = 3  # downloads ao mesmo tempo; o resto espera na fila
-APP_VERSION = "2.12"
+APP_VERSION = "2.13"
 IS_WIN = sys.platform == "win32"
 IS_MAC = sys.platform == "darwin"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # Windows: sem piscar console
@@ -32,6 +32,9 @@ else:
 BIN = SUPPORT / "bin"
 SETTINGS_FILE = SUPPORT / "settings.json"
 HISTORY_FILE = SUPPORT / "baixados.json"
+BRIDGE = SUPPORT / "premiere"             # conversa com o painel do Premiere
+BRIDGE_REQ = BRIDGE / "pedidos"
+BRIDGE_STATUS = BRIDGE / "status"
 INDEX_HTML = (HERE / "index.html").read_bytes()
 
 SUPPORT.mkdir(parents=True, exist_ok=True)
@@ -287,6 +290,9 @@ def record_download(job, info, filepath):
         "added": job.get("created"),
         "finished": time.time(),
     }
+    files = job.setdefault("files", [])
+    if str(filepath) not in files:
+        files.append(str(filepath))
     with hist_lock:
         # o mesmo arquivo baixado de novo substitui a entrada antiga
         history["items"] = [i for i in history["items"] if i.get("filepath") != item["filepath"]]
@@ -568,6 +574,132 @@ class WindowApi:
         WINDOW.destroy()
 
 
+def create_job(data, source="app", remember=True):
+    """Cria um download na fila. Devolve o id do job."""
+    url = (data.get("url") or "").strip()
+    quality = data.get("quality") or "1080"
+    if quality not in QUALITIES:
+        raise ValueError("Qualidade inválida")
+    if not re.match(r"https?://", url):
+        raise ValueError("Link inválido")
+    start, end = parse_time(data.get("start")), parse_time(data.get("end"))
+    if start is not None and end is not None and end <= start:
+        raise ValueError("O fim do trecho precisa vir depois do início.")
+    folder = (data.get("folder") or "").strip() or settings["folder"]
+    Path(folder).mkdir(parents=True, exist_ok=True)
+    playlist = data.get("playlist")
+    if playlist is None:  # veio pelo Enter, sem prévia
+        playlist = "/playlist" in url and "list=" in url
+    job_id = uuid.uuid4().hex[:10]
+    with lock:
+        jobs[job_id] = {
+            "id": job_id, "url": url, "title": data.get("title") or url,
+            "thumbnail": data.get("thumbnail"), "quality": quality,
+            "folder": folder, "start": start, "end": end,
+            "playlist": bool(playlist),
+            "h264": bool(data.get("h264", settings.get("h264", True))),
+            "status": "queued", "phase": "Na fila", "progress": None,
+            "speed": None, "eta": None, "size": None, "filepath": None,
+            "error": None, "cancel": False, "item": None, "current_title": None,
+            "created": time.time(),
+            "seq": next_seq(),
+            "files": [], "source": source,
+        }
+        order.append(job_id)
+    if remember:
+        settings["quality"] = quality
+        save_settings(settings)
+    work.put(job_id)
+    return job_id
+
+
+# ---------------------------------------------------------------- ponte com o Premiere
+# O Premiere não deixa extensões usarem http:// no Mac, então o painel conversa
+# com o app por arquivos: escreve um pedido em premiere/pedidos/<id>.json, e o
+# app responde em premiere/status/<id>.json. premiere/app.json é o "sinal de vida".
+bridge_jobs = {}  # id do pedido -> id do job
+
+
+def write_json_atomic(path, data):
+    tmp = path.with_name(path.name + f".{uuid.uuid4().hex[:6]}.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def bridge_status(rid, jid=None, error=None):
+    j = jobs.get(jid) if jid else None
+    if j is None:
+        return {"id": rid, "status": "error", "phase": "Erro", "error": error or "Pedido perdido.",
+                "files": [], "updated": time.time()}
+    return {
+        "id": rid, "job": jid, "status": j["status"], "phase": j["phase"],
+        "progress": j.get("progress"), "eta": j.get("eta"), "title": j.get("title"),
+        "item": j.get("item"), "quality": j.get("quality"), "error": j.get("error"),
+        "files": list(j.get("files") or []), "updated": time.time(),
+    }
+
+
+def bridge_loop():
+    for d in (BRIDGE_REQ, BRIDGE_STATUS):
+        d.mkdir(parents=True, exist_ok=True)
+    last = {}
+    beat = 0.0
+    while True:
+        try:
+            now = time.time()
+            if now - beat > 1.5:
+                write_json_atomic(BRIDGE / "app.json", {
+                    "alive": now, "version": APP_VERSION, "folder": settings["folder"],
+                    "platform": "win" if IS_WIN else "mac"})
+                beat = now
+            # pedidos novos
+            for f in sorted(BRIDGE_REQ.glob("*.json")):
+                try:
+                    req = json.loads(f.read_text(encoding="utf-8"))
+                except Exception:
+                    if now - f.stat().st_mtime > 10:
+                        f.unlink(missing_ok=True)
+                    continue
+                f.unlink(missing_ok=True)
+                rid = str(req.get("id") or f.stem)[:40]
+                try:
+                    jid = create_job(req, source="premiere", remember=False)
+                    bridge_jobs[rid] = jid
+                    print(f"Premiere pediu: {req.get('url')} ({req.get('quality')})", flush=True)
+                except Exception as exc:
+                    write_json_atomic(BRIDGE_STATUS / f"{rid}.json",
+                                      bridge_status(rid, error=friendly_error(str(exc))))
+            # cancelamentos
+            for f in BRIDGE_REQ.glob("*.cancel"):
+                jid = bridge_jobs.get(f.stem)
+                f.unlink(missing_ok=True)
+                if jid in jobs:
+                    with lock:
+                        jobs[jid]["cancel"] = True
+                        if jobs[jid]["status"] == "queued":
+                            jobs[jid].update(status="canceled", phase="Cancelado")
+            # respostas
+            for rid, jid in list(bridge_jobs.items()):
+                st = bridge_status(rid, jid)
+                key = json.dumps({k: v for k, v in st.items() if k != "updated"}, sort_keys=True,
+                                 default=str)
+                if last.get(rid) != key:
+                    write_json_atomic(BRIDGE_STATUS / f"{rid}.json", st)
+                    last[rid] = key
+                if st["status"] in ("done", "error", "canceled") and jid in jobs and \
+                        now - jobs[jid].get("created", now) > 6 * 3600:
+                    bridge_jobs.pop(rid, None)
+                    last.pop(rid, None)
+            # limpa respostas antigas (mais de 2 dias)
+            if int(now) % 600 == 0:
+                for f in BRIDGE_STATUS.glob("*.json"):
+                    if now - f.stat().st_mtime > 2 * 86400:
+                        f.unlink(missing_ok=True)
+        except Exception as exc:
+            print("Ponte Premiere:", exc, flush=True)
+        time.sleep(0.4)
+
+
 # ---------------------------------------------------------------- mac helpers
 def choose_folder(current):
     if WINDOW is not None:
@@ -733,39 +865,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(get_info(url))
 
         elif p == "/api/download":
-            url = (data.get("url") or "").strip()
-            quality = data.get("quality") or "1080"
-            if quality not in QUALITIES:
-                raise ValueError("Qualidade inválida")
-            if not re.match(r"https?://", url):
-                raise ValueError("Link inválido")
-            start, end = parse_time(data.get("start")), parse_time(data.get("end"))
-            if start is not None and end is not None and end <= start:
-                raise ValueError("O fim do trecho precisa vir depois do início.")
-            folder = (data.get("folder") or "").strip() or settings["folder"]
-            Path(folder).mkdir(parents=True, exist_ok=True)
-            playlist = data.get("playlist")
-            if playlist is None:  # veio pelo Enter, sem prévia
-                playlist = "/playlist" in url and "list=" in url
-            job_id = uuid.uuid4().hex[:10]
-            with lock:
-                jobs[job_id] = {
-                    "id": job_id, "url": url, "title": data.get("title") or url,
-                    "thumbnail": data.get("thumbnail"), "quality": quality,
-                    "folder": folder, "start": start, "end": end,
-                    "playlist": bool(playlist),
-                    "h264": bool(data.get("h264", settings.get("h264", True))),
-                    "status": "queued", "phase": "Na fila", "progress": None,
-                    "speed": None, "eta": None, "size": None, "filepath": None,
-                    "error": None, "cancel": False, "item": None, "current_title": None,
-                    "created": time.time(),
-                    "seq": next_seq(),
-                }
-                order.append(job_id)
-            settings["quality"] = quality
-            save_settings(settings)
-            work.put(job_id)
-            self.send_json({"id": job_id})
+            self.send_json({"id": create_job(data)})
 
         elif p == "/api/cancel":
             jid = data.get("id")
@@ -935,6 +1035,7 @@ def main():
         webbrowser.open(url)  # já está rodando
         return
     print(f"YT Downloader em {url} (yt-dlp {yt_dlp.version.__version__})", flush=True)
+    threading.Thread(target=bridge_loop, daemon=True).start()
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
     use_browser = "--browser" in sys.argv or "--no-browser" in sys.argv

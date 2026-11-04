@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="styles.css">
+  <script src="main.js"></script>
+</head>
+<body>
+  <div class="top">
+    <div class="brand"><div class="sq"></div><span>YT_DOWNLOADER</span></div>
+    <div class="conn"><div class="dot" id="dot"></div><span id="conn">...</span></div>
+  </div>
+
+  <div class="banner hidden" id="offline">
+    <div class="bt">// APP FECHADO</div>
+    <div class="bd">Abra o YT Downloader para baixar. Os pedidos ficam guardados e começam assim que ele abrir.</div>
+    <div class="btn sm" id="openApp">Abrir o app</div>
+  </div>
+
+  <div class="panel">
+    <div class="bar"><span>NOVO_DOWNLOAD.EXE</span><span class="deco">— □ ×</span></div>
+    <div class="body">
+      <div class="label">// LINK</div>
+      <div class="row">
+        <input class="field grow" id="url" type="text" placeholder="https://youtube.com/watch?v=..." autocomplete="off">
+        <div class="btn" id="paste">Colar</div>
+      </div>
+
+      <div class="label mt">// TIPO</div>
+      <div class="seg" id="kind">
+        <div class="opt active" data-kind="video">VÍDEO</div>
+        <div class="opt" data-kind="sfx">SFX · ÁUDIO</div>
+      </div>
+
+      <div class="seg mt-s" id="vq">
+        <div class="opt active" data-q="1080">1080P</div>
+        <div class="opt" data-q="720">720P</div>
+        <div class="opt" data-q="max">MÁX</div>
+      </div>
+      <div class="seg mt-s hidden" id="aq">
+        <div class="opt active" data-q="wav">WAV</div>
+        <div class="opt" data-q="mp3">MP3</div>
+      </div>
+      <div class="note" id="kindNote">Sempre H.264 + AAC, pronto para a timeline.</div>
+
+      <div class="check mt" id="useRange"><div class="box"><div class="in"></div></div><span>SÓ UM TRECHO (B-ROLL)</span></div>
+      <div class="range hidden" id="range">
+        <input class="field t" id="start" type="text" placeholder="0:00">
+        <span class="arrow">→</span>
+        <input class="field t" id="end" type="text" placeholder="0:30">
+        <span class="hint">min:seg · fim vazio = até o final</span>
+      </div>
+
+      <div class="dest">
+        <div class="label">// SALVAR EM</div>
+        <div class="seg" id="dest">
+          <div class="opt active" data-dest="project">PROJETO</div>
+          <div class="opt" data-dest="app">APP</div>
+          <div class="opt" data-dest="custom">OUTRA PASTA</div>
+        </div>
+        <div class="row mt-s">
+          <div class="path grow" id="destPath">...</div>
+          <div class="btn sm2 hidden" id="pick">Escolher</div>
+        </div>
+        <div class="note" id="destNote"></div>
+        <div class="note">Importa no projeto em <b>YT Downloads</b> ▸ <span id="binName">Vídeos</span></div>
+      </div>
+
+      <div class="btn red go" id="go">BAIXAR E IMPORTAR ↓</div>
+      <div class="msg" id="msg">Cole o link e aperte Enter.</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="bar"><span>FILA.DIR</span><span class="deco" id="clear">LIMPAR</span></div>
+    <div class="body" id="jobs"><div class="empty">// Nenhum download ainda.</div></div>
+  </div>
+</body>
+</html>

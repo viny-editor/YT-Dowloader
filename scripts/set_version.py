@@ -15,6 +15,9 @@ RULES = [
     ("app/Contents/Info.plist", r"(<key>CFBundle(?:Short)?Version(?:String)?</key><string>)[^<]*",
      lambda m: m.group(1) + v),
     ("windows/launcher.py", r'APP_VERSION = "[^"]*"', f'APP_VERSION = "{v}"'),
+    # extensão do Premiere: a Adobe exige versão com 3 números (2.12 -> 2.12.0)
+    ("premiere/manifest.json", r'"version": "[^"]*"',
+     f'"version": "{v if v.count(".") >= 2 else v + ".0"}"'),
 ]
 for rel, pattern, repl in RULES:
     p = root / rel
