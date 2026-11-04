@@ -21,10 +21,11 @@ import time
 import traceback
 import urllib.request
 import webbrowser
+import uuid
 import zipfile
 from pathlib import Path
 
-APP_VERSION = "2.9"
+APP_VERSION = "2.11"
 PORT = 8765
 NAME = "YT Downloader"
 URL = f"http://127.0.0.1:{PORT}"
@@ -95,28 +96,49 @@ def run(cmd, what):
         raise RuntimeError(f"Falhou: {what}.")
 
 
-def download_zip(url, exe_name, progress):
-    """Baixa um .zip e extrai só o executável indicado para a pasta bin."""
+def _download_once(url, exe_name, progress):
     BIN.mkdir(parents=True, exist_ok=True)
-    tmp = SUPPORT / (exe_name + ".zip")
-    with urllib.request.urlopen(url, timeout=60) as r, open(tmp, "wb") as out:
-        total = int(r.headers.get("Content-Length") or 0)
-        done = 0
-        while True:
-            chunk = r.read(256 * 1024)
-            if not chunk:
-                break
-            out.write(chunk)
-            done += len(chunk)
-            if total:
-                progress(done / total)
-    with zipfile.ZipFile(tmp) as z:
-        member = next((m for m in z.namelist() if m.replace("\\", "/").split("/")[-1].lower() == exe_name), None)
-        if not member:
-            raise RuntimeError(f"{exe_name} não encontrado no download.")
-        with z.open(member) as src, open(BIN / exe_name, "wb") as dst:
-            shutil.copyfileobj(src, dst)
-    tmp.unlink(missing_ok=True)
+    tag = uuid.uuid4().hex[:12]
+    tmp_zip = SUPPORT / f"{exe_name}.{tag}.zip"
+    tmp_exe = BIN / f"{exe_name}.{tag}.tmp"
+    try:
+        with urllib.request.urlopen(url, timeout=60) as r, open(tmp_zip, "wb") as out:
+            total = int(r.headers.get("Content-Length") or 0)
+            done = 0
+            while True:
+                chunk = r.read(256 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+                done += len(chunk)
+                if total:
+                    progress(done / total)
+        with zipfile.ZipFile(tmp_zip) as z:
+            member = next((m for m in z.namelist() if m.replace("\\", "/").split("/")[-1].lower() == exe_name), None)
+            if not member:
+                raise RuntimeError(f"{exe_name} não encontrado no download.")
+            with z.open(member) as src, open(tmp_exe, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+        os.replace(tmp_exe, BIN / exe_name)  # só aparece pronto, nunca pela metade
+    finally:
+        for f in (tmp_zip, tmp_exe):
+            try:
+                f.unlink()
+            except OSError:
+                pass
+
+
+def download_zip(url, exe_name, progress):
+    """Baixa um .zip e extrai só o executável indicado para a pasta bin (tenta 3 vezes)."""
+    last = None
+    for attempt in range(3):
+        try:
+            return _download_once(url, exe_name, progress)
+        except Exception as exc:  # zip corrompido, rede caiu, arquivo em uso...
+            last = exc
+            log(f"Download de {exe_name} falhou (tentativa {attempt + 1}/3): {exc}")
+            time.sleep(1.5 * (attempt + 1))
+    raise RuntimeError(f"Não consegui baixar {exe_name}.") from last
 
 
 def is_stale():
@@ -221,12 +243,31 @@ STEPS = [
 def plan():
     first = not PY_GUI.exists()
     return {
-        "uv": not UV.exists(),
+        "uv": not _uv_ok(),
         "deno": not DENO.exists(),
         "python": first,
         "pkgs": first or is_stale() or not _has_webview(),
         "first": first,
     }
+
+
+def _uv_ok():
+    """O uv.exe existe e funciona? (um download interrompido pode deixá-lo estragado)"""
+    if not UV.exists():
+        return False
+    try:
+        r = subprocess.run([str(UV), "--version"], capture_output=True, timeout=20,
+                           creationflags=NO_WINDOW, env=ENV)
+        if r.returncode == 0:
+            return True
+    except Exception:
+        pass
+    log("uv.exe estragado; vou baixar de novo.")
+    try:
+        UV.unlink()
+    except OSError:
+        pass
+    return False
 
 
 def _has_webview():
@@ -463,12 +504,52 @@ class SetupWindow:
 
 
 # ------------------------------------------------------------------ main
+_MUTEX = None
+
+
+def single_instance():
+    """True se esta é a única cópia do inicializador rodando agora."""
+    global _MUTEX
+    if sys.platform != "win32":
+        return True
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        kernel32.CreateMutexW.restype = ctypes.c_void_p
+        _MUTEX = kernel32.CreateMutexW(None, False, "Local\\YTDownloaderLauncher")
+        return kernel32.GetLastError() != 183  # ERROR_ALREADY_EXISTS
+    except Exception as exc:
+        log("Aviso: trava de instância única falhou:", exc)
+        return True
+
+
+def wait_other_instance():
+    """Outra cópia já está instalando/abrindo: espera ela terminar e traz o app para frente."""
+    log("Outra cópia do inicializador já está rodando; aguardando.")
+    for _ in range(600):  # até 5 min (primeira instalação)
+        time.sleep(0.5)
+        try:
+            ping = app_api("/api/ping", timeout=0.5)
+        except Exception:
+            continue
+        if ping.get("app") == APP_VERSION:
+            try:
+                app_api("/api/focus", post=True)
+            except Exception:
+                pass
+            return
+
+
 def main():
     if DEMO:
         SetupWindow(first=True).run(demo_steps)
         return
     SUPPORT.mkdir(parents=True, exist_ok=True)
     log(f"==== {time.strftime('%Y-%m-%d %H:%M:%S')} · inicializador {APP_VERSION} ====")
+    if not single_instance():
+        wait_other_instance()
+        return
     if handle_running_instance():
         return
     todo = plan()
