@@ -1,0 +1,94 @@
+#!/bin/bash
+# Inicializador do YT Downloader.
+# Na primeira vez, baixa (só para este app, sem mexer no resto do Mac):
+#   - uv (instalador de Python)  - Python 3.12  - yt-dlp + ffmpeg  - Deno  - pywebview (janela nativa)
+# Tudo fica em ~/Library/Application Support/YT Downloader
+
+SUPPORT="$HOME/Library/Application Support/YT Downloader"
+BIN="$SUPPORT/bin"
+VENV="$SUPPORT/venv"
+RES="$(cd "$(dirname "$0")/../Resources" && pwd)"
+LOG="$SUPPORT/log.txt"
+PORT=8765
+
+mkdir -p "$BIN"
+exec >>"$LOG" 2>&1
+echo "==== $(date) ===="
+export PATH="$BIN:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+notify() { osascript -e "display notification \"$1\" with title \"YT Downloader\"" >/dev/null 2>&1; }
+fail() {
+  osascript -e "display alert \"YT Downloader não conseguiu abrir\" message \"$1\n\nDetalhes no arquivo: $LOG\" as critical" >/dev/null 2>&1
+  exit 1
+}
+
+APP_VERSION="2.9"
+api() { curl -s -m 2 -X POST -H "X-YTD: 1" -H "Content-Type: application/json" -d '{}' "http://127.0.0.1:$PORT/api/$1"; }
+
+# Já tem algo rodando na porta do app?
+PING=$(curl -s -m 1 "http://127.0.0.1:$PORT/api/ping" 2>/dev/null)
+if [ -n "$PING" ] && echo "$PING" | grep -q "\"app\": \"$APP_VERSION\""; then
+  # É esta mesma versão: só traz a janela para frente.
+  api focus | grep -q '"native": true' || open "http://127.0.0.1:$PORT"
+  exit 0
+fi
+# Versão antiga (ou travada) ainda aberta: fecha antes de abrir a nova.
+if [ -n "$PING" ] || lsof -ti tcp:$PORT >/dev/null 2>&1; then
+  echo "Fechando versão anterior que ainda estava rodando…"
+  api quit >/dev/null 2>&1
+  sleep 1
+  lsof -ti tcp:$PORT 2>/dev/null | xargs kill 2>/dev/null
+  sleep 1
+fi
+
+FIRST=0
+[ -x "$VENV/bin/python" ] || FIRST=1
+[ $FIRST = 1 ] && notify "Preparando tudo na primeira vez. Leva 1 a 2 minutos…"
+
+# 1) uv
+if [ ! -x "$BIN/uv" ]; then
+  curl -LsSf https://astral.sh/uv/install.sh | env UV_UNMANAGED_INSTALL="$BIN" sh \
+    || fail "Não consegui baixar o instalador do Python. Verifique sua internet."
+fi
+
+# 2) Deno (o yt-dlp precisa dele para o YouTube)
+if [ ! -x "$BIN/deno" ]; then
+  if [ "$(uname -m)" = "arm64" ]; then T="aarch64-apple-darwin"; else T="x86_64-apple-darwin"; fi
+  curl -fsSL -o "$SUPPORT/deno.zip" "https://github.com/denoland/deno/releases/latest/download/deno-$T.zip" \
+    && unzip -o -q "$SUPPORT/deno.zip" -d "$BIN" && chmod +x "$BIN/deno"
+  rm -f "$SUPPORT/deno.zip"
+  [ -x "$BIN/deno" ] || echo "Aviso: Deno não instalado; algumas qualidades podem faltar."
+fi
+
+# 3) Python
+if [ ! -x "$VENV/bin/python" ]; then
+  "$BIN/uv" venv --python 3.12 "$VENV" || fail "Não consegui preparar o Python."
+fi
+
+# 4) yt-dlp + ffmpeg (atualiza no máximo uma vez por dia; o YouTube muda com frequência)
+STAMP="$SUPPORT/.ultima_atualizacao"
+if [ $FIRST = 1 ] || [ ! -f "$STAMP" ] || [ -n "$(find "$STAMP" -mtime +0 2>/dev/null)" ]; then
+  if "$BIN/uv" pip install --python "$VENV/bin/python" -U "yt-dlp[default]" imageio-ffmpeg pywebview; then
+    touch "$STAMP"
+  elif [ $FIRST = 1 ]; then
+    fail "Não consegui instalar o yt-dlp. Verifique sua internet."
+  fi
+fi
+
+# Janela nativa (pywebview) — instala se ainda não tiver (quem veio da versão anterior)
+if ! "$VENV/bin/python" -c "import webview" 2>/dev/null; then
+  [ $FIRST = 1 ] || notify "Atualizando para a janela nativa…"
+  "$BIN/uv" pip install --python "$VENV/bin/python" pywebview || echo "Aviso: pywebview não instalado; vai abrir no navegador."
+fi
+
+# Copia os arquivos do app para uma pasta fixa e roda de lá.
+# Quando um app baixado é aberto direto da pasta onde foi descompactado, o macOS
+# o executa de um local temporário ("App Translocation") que some logo depois.
+RUNTIME="$SUPPORT/runtime"
+rm -rf "$RUNTIME.new" && mkdir -p "$RUNTIME.new" && cp -R "$RES"/. "$RUNTIME.new"/ \
+  && rm -rf "$RUNTIME" && mv "$RUNTIME.new" "$RUNTIME" \
+  || fail "Não consegui preparar os arquivos do app."
+case "$RES" in *AppTranslocation*) echo "Aviso: app rodando de local temporário (App Translocation).";; esac
+
+[ $FIRST = 1 ] && notify "Pronto! Abrindo o app…"
+exec "$VENV/bin/python" "$RUNTIME/app.py"
