@@ -1,3 +1,8 @@
+# Sempre que uma Release é publicada, gera e anexa à Release:
+#   YT-Downloader-Mac.zip         (montado no Linux; o app Mac é só arquivos)
+#   YT-Downloader-Premiere.ccx    (extensão do Premiere; um .ccx é um zip)
+#   YT-Downloader-Windows.zip     (compilado num Windows com PyInstaller)
+# A versão vem da tag: tag "v2.5" -> versão 2.5 em todos os arquivos.
 name: Montar e publicar os apps
 
 on:
@@ -6,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag de uma Release existente (ex.: v2.9)"
+        description: "Tag de uma Release existente (ex.: v2.13)"
         required: true
 
 permissions:
@@ -33,10 +38,14 @@ jobs:
           cp LEIA-ME.txt dist/
           cd dist && zip -r -X ../YT-Downloader-Mac.zip "YT Downloader.app" LEIA-ME.txt
 
+      - name: Montar a extensão do Premiere (.ccx)
+        run: |
+          cd premiere && zip -r -X ../YT-Downloader-Premiere.ccx . -x "*.DS_Store"
+
       - name: Anexar à Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" YT-Downloader-Mac.zip --clobber
+        run: gh release upload "$TAG" YT-Downloader-Mac.zip YT-Downloader-Premiere.ccx --clobber
 
   windows:
     name: App do Windows
@@ -70,6 +79,7 @@ jobs:
           test -f "dist/YT Downloader/YT Downloader.exe"
           test -f "dist/YT Downloader/_internal/payload/app.py"
           test -f "dist/YT Downloader/_internal/payload/index.html"
+          python -m py_compile windows/launcher.py app/Contents/Resources/app.py
           echo "Pacote OK"
 
       - name: Empacotar
