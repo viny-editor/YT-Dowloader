@@ -1,0 +1,85 @@
+name: Montar e publicar os apps
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag de uma Release existente (ex.: v2.9)"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  mac:
+    name: App do Mac
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Gravar a versão
+        run: python3 scripts/set_version.py "$TAG"
+
+      - name: Montar o YT Downloader.app
+        run: |
+          mkdir -p dist
+          cp -R app "dist/YT Downloader.app"
+          chmod +x "dist/YT Downloader.app/Contents/MacOS/YTDownloader"
+          cp LEIA-ME.txt dist/
+          cd dist && zip -r -X ../YT-Downloader-Mac.zip "YT Downloader.app" LEIA-ME.txt
+
+      - name: Anexar à Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" YT-Downloader-Mac.zip --clobber
+
+  windows:
+    name: App do Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Gravar a versão
+        shell: bash
+        run: python scripts/set_version.py "$TAG"
+
+      - name: Compilar o YT Downloader.exe
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip pyinstaller
+          python -m PyInstaller --noconfirm --clean --windowed --onedir \
+            --name "YT Downloader" \
+            --icon windows/AppIcon.ico \
+            --add-data "app/Contents/Resources/app.py;payload" \
+            --add-data "app/Contents/Resources/index.html;payload" \
+            --add-data "windows/AppIcon.ico;payload" \
+            windows/launcher.py
+
+      - name: Conferir o pacote
+        shell: bash
+        run: |
+          test -f "dist/YT Downloader/YT Downloader.exe"
+          test -f "dist/YT Downloader/_internal/payload/app.py"
+          test -f "dist/YT Downloader/_internal/payload/index.html"
+          echo "Pacote OK"
+
+      - name: Empacotar
+        shell: pwsh
+        run: |
+          Copy-Item windows/LEIA-ME.txt "dist/YT Downloader/LEIA-ME.txt"
+          Compress-Archive -Path "dist/YT Downloader" -DestinationPath YT-Downloader-Windows.zip
+
+      - name: Anexar à Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" YT-Downloader-Windows.zip --clobber
